@@ -12,6 +12,7 @@ const bucketUtils = require('./lib/bucketUtils');
 const uploadDirectory = require('./lib/upload');
 const validateClient = require('./lib/validate');
 const invalidateCloudfrontDistribution = require('./lib/cloudFront');
+const {groupDomainsByHostedZone} = require('./lib/route53');
 
 class ServerlessFullstackPlugin {
     constructor(serverless, cliOptions) {
@@ -256,8 +257,9 @@ class ServerlessFullstackPlugin {
             filename: filename
         });
 
-        this.prepareResources(resources);
-        return _.merge(baseResources, resources);
+        return this.prepareResources(resources).then(() => {
+            return _.merge(baseResources, resources);
+        });
     }
 
     checkForApiGataway() {
@@ -335,8 +337,10 @@ class ServerlessFullstackPlugin {
         this.serverless.cli.consoleLog(`  ${apiDistributionDomain.OutputValue} (CNAME: ${cnameDomain})`);
     }
 
-    prepareResources(resources) {
+    async prepareResources(resources) {
         const distributionConfig = resources.Resources.ApiDistribution.Properties.DistributionConfig;
+
+        await this.prepareRoute53(resources.Resources);
 
         this.prepareLogging(distributionConfig);
         this.prepareDomain(distributionConfig);
@@ -351,6 +355,55 @@ class ServerlessFullstackPlugin {
         this.prepareMinimumProtocolVersion(distributionConfig);
         this.prepareDefaultCacheBehavior(distributionConfig);
 
+    }
+
+    async prepareRoute53(resources) {
+        if (this.options.domain) {
+            const certificate = this.getConfig("certificate", null);
+            const distributionCertificate = resources.ApiDistribution.Properties.DistributionConfig.ViewerCertificate;
+
+            if (this.getConfig("route53", false) === true) {
+                const filename = path.resolve(__dirname, 'lib/resources/templates.yml');
+                const content = fs.readFileSync(filename, 'utf-8');
+                const templates = yaml.safeLoad(content, {filename});
+
+                const domains = Array.isArray(this.options.domain) ? this.options.domain : [this.options.domain];
+                const domainsByHostedZones = await groupDomainsByHostedZone(this.serverless, domains);
+                const domainsWithoutHostedZone = domainsByHostedZones
+                    .filter((hostedZone) => !hostedZone.Id)
+                    .reduce((acc, hostedZone) => [...acc, ...hostedZone.domains], []);
+                const filteredDomainsByHostedZones = domainsByHostedZones
+                    .filter(hostedZone => !!hostedZone.Id && hostedZone.domains.length);
+
+                if (domainsWithoutHostedZone?.length > 0)
+                    this.serverless.cli.log(`No hosted zones found for ${domainsWithoutHostedZone}, records pointing to`
+                                        +` the cloudfront domain will have to be added manually.`, "Route53", {color: "orange", underline: true});
+
+                const aliasTemplate = templates.Route53AliasTemplate;
+                const recordSetTemplate = aliasTemplate.Properties.RecordSets.pop();
+
+                for (const hostedZone of filteredDomainsByHostedZones) {
+                    const recordSets = hostedZone.domains.map(domain => ({...recordSetTemplate, Name: domain}));
+                    const alias = {...aliasTemplate, Properties: {...aliasTemplate.Properties, RecordSets: recordSets, HostedZoneId: hostedZone.Id}};
+                    resources["Route53AliasHZ" + hostedZone.Id] = alias;
+                }
+
+                // only create and override if not specified
+                if (certificate === null) {
+                    const certTemplate = templates.CertTemplate;
+                    certTemplate.Properties.DomainName = domains[0];
+                    if (domains.length > 1) certTemplate.Properties.SubjectAlternativeNames = domains.slice(1);
+
+                    const route53domainValidations = filteredDomainsByHostedZones.flatMap(hz => hz.domains.map(DomainName => ({DomainName, HostedZoneId: hz.Id})));
+                    const manualValidations = domainsWithoutHostedZone.map(DomainName => ({DomainName, ValidationDomain: DomainName}));
+                    certTemplate.Properties.DomainValidationOptions = [...route53domainValidations, ...manualValidations];
+
+                    const certResourceName = "ApiDistributionCertificate";
+                    resources[certResourceName] = certTemplate;
+                    distributionCertificate.AcmCertificateArn = {Ref: certResourceName};
+                }
+            }
+        }
     }
 
     prepareLogging(distributionConfig) {
@@ -428,7 +481,7 @@ class ServerlessFullstackPlugin {
         if (certificate !== null) {
             this.serverless.cli.log(`Configuring SSL certificate...`);
             distributionConfig.ViewerCertificate.AcmCertificateArn = certificate;
-        } else {
+        } else if (!distributionConfig.ViewerCertificate.AcmCertificateArn) {
             delete distributionConfig.ViewerCertificate;
         }
     }

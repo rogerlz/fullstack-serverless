@@ -1,0 +1,26 @@
+Route53AliasTemplate:
+  Type: AWS::Route53::RecordSetGroup
+  Properties:
+    HostedZoneId: hostedZoneId
+    RecordSets:
+      - Name: domain.tld
+        Type: A
+        AliasTarget:
+          HostedZoneId: Z2FDTNDATAQYW2 # The static CloudFront Hosted Zone ID
+          DNSName:
+            Fn::GetAtt: ["ApiDistribution", "DomainName"]
+          EvaluateTargetHealth: false
+      # ...
+
+CertTemplate:
+  Type: AWS::CertificateManager::Certificate
+  Properties:
+    DomainName: domain.tld
+    DomainValidationOptions:
+      # - DomainName: domain.tld
+      #   HostedZoneId: hostedZoneId
+      # - DomainName: example.com
+      #   ValidationDomain: example.com
+      # ...
+    ValidationMethod: DNS
+    # SubjectAlternativeNames:
