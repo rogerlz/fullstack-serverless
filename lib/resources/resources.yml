@@ -80,7 +80,6 @@ Resources:
             HTTPSPort: '443'
             OriginProtocolPolicy: https-only
             OriginSSLProtocols: [ "TLSv1", "TLSv1.1", "TLSv1.2" ]
-          OriginPath: "/dev"
         Enabled: true
         HttpVersion: http2
         Comment: cdn for api gateway

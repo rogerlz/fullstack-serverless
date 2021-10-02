@@ -184,7 +184,7 @@ class ServerlessFullstackPlugin {
                     if (!Array.isArray(invalidationPaths)) {
                         invalidationPaths = [invalidationPaths];
                     }
-                    
+
                     //paths must start with '/'
                     invalidationPaths = invalidationPaths.map(path => path[0] === '/' ? path : '/' + path);
 
@@ -264,9 +264,8 @@ class ServerlessFullstackPlugin {
 
     checkForApiGataway() {
         const baseResources = this.serverless.service.provider.compiledCloudFormationTemplate;
-        const apiGatewayConfig = baseResources.Resources.ApiGatewayRestApi;
 
-        if (!apiGatewayConfig && !this.setApiGatewayIdFromConfig(baseResources)) {
+        if (!this.setApiGatewayId(baseResources)) {
             this.removeApiGatewayOrigin(baseResources);
         }
 
@@ -284,10 +283,12 @@ class ServerlessFullstackPlugin {
         }));
     }
 
-    setApiGatewayIdFromConfig(baseResources) {
-        const restApiId = this.getRestApiId();
+    setApiGatewayId(baseResources) {
+        const apiGatewayRestResource = baseResources.Resources.ApiGatewayRestApi && {Ref: 'ApiGatewayRestApi' };
+        const apiGatewayHttpResource = baseResources.Resources.HttpApi && {Ref: 'HttpApi' };
+        const apiGatewayId = apiGatewayRestResource || apiGatewayHttpResource || this.getRestApiId();
 
-        if (!restApiId) {
+        if (!apiGatewayId) {
             return false;
         }
 
@@ -295,7 +296,7 @@ class ServerlessFullstackPlugin {
         const apiOrigin = distributionConfig.Origins.find(origin => origin.Id === 'ApiGateway');
 
         apiOrigin.DomainName = {
-            'Fn::Join': ['', [restApiId, '.execute-api.', {
+            'Fn::Join': ['', [apiGatewayId, '.execute-api.', {
                 Ref: 'AWS::Region'
             }, '.amazonaws.com']]
         };
@@ -438,13 +439,15 @@ class ServerlessFullstackPlugin {
     }
 
     prepareOrigins(distributionConfig) {
-        this.serverless.cli.log(`Setting ApiGateway stage to '${this.getStage()}'...`);
-        for (var origin of distributionConfig.Origins) {
-            if (origin.Id === 'ApiGateway') {
-                origin.OriginPath = `/${this.getStage()}`;
-            }
+        if (!this.serverless.service.provider.httpApi) {
+          this.serverless.cli.log(`Setting ApiGateway stage to '${this.getStage()}'...`);
+          for (var origin of distributionConfig.Origins) {
+              if (origin.Id === 'ApiGateway') {
+                  origin.OriginPath = `/${this.getStage()}`;
+              }
+          }
         }
-        
+
         const customOrigins = this.getConfig('origins', null);
         if (customOrigins) {
             distributionConfig.Origins.push(
@@ -461,7 +464,7 @@ class ServerlessFullstackPlugin {
                 cacheBehavior.PathPattern = `${apiPath}/*`;
             }
         }
-        
+
         const customCacheBehaviors = this.getConfig('cacheBehaviors', null);
         if (customCacheBehaviors) {
             distributionConfig.CacheBehaviors.push(
