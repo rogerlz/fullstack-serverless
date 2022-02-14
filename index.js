@@ -190,7 +190,7 @@ class ServerlessFullstackPlugin {
 
                     const deployDescribe = ['This deployment will:'];
 
-                    if (this.cliOptions['delete-contents'] !== false) {
+                    if (this.cliOptions['delete-contents'] !== false || this.options['deleteContents'] !== false) {
                         deployDescribe.push(`- Remove all existing files from bucket '${bucketName}'`);
                     }
                     deployDescribe.push(
@@ -208,7 +208,7 @@ class ServerlessFullstackPlugin {
                             .then(exists => {
                                 if (exists) {
                                     this.serverless.cli.log(`Bucket found...`);
-                                    if (this.cliOptions['delete-contents'] === false) {
+                                    if (this.cliOptions['delete-contents'] === false || this.options['deleteContents'] === false) {
                                         this.serverless.cli.log(`Keeping current bucket contents...`);
                                         return BbPromise.resolve();
                                     }
