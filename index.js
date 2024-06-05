@@ -402,6 +402,7 @@ class ServerlessFullstackPlugin {
                     const certResourceName = "ApiDistributionCertificate";
                     resources[certResourceName] = certTemplate;
                     distributionCertificate.AcmCertificateArn = {Ref: certResourceName};
+                    distributionCertificate.SslSupportMethod = "sni-only";
                 }
             }
         }
